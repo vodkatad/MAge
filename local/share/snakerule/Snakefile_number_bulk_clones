@@ -1,0 +1,55 @@
+include: "conf.sk"
+
+rule all_var_cnv:
+	input: expand('{sample}.var_cnv.tsv.gz', sample=ALL_SAMPLES)
+
+rule all_binomial:
+	input: expand('{sample}.calls.tsv.gz', sample=ALL_SAMPLES)
+# Step 1: vcf to bed/tsv
+rule process_vcf:
+    input: vcf=DATA+"/{sample}.pass.vcf.gz", chrs=CHRS
+    output: "{sample}.tsv.gz"
+    params: tool=VCFTOBED, multi=MULTI, kind=KIND, sample= lambda wildcards: SAMPLE if SAMPLE!="wildcards" else wildcards.sample
+    log: "{sample}.multiallelic"
+    shell:
+        """
+            bcftools view -s {params.sample} {input.vcf} | bcftools annotate -I +'%CHROM:%POS:%REF:%ALT' - \\
+            | grep -v "^#" |  filter_1col 1 {input.chrs} | {params.tool} {params.kind} {params.multi} 2> {log} | gzip > {output}
+        """
+
+# Step 2: intersect with sequenza CN
+# we guess sequenza is 1 based cause it starts from pileups...end...included? Looked around in code, sic, going with "assumptions".
+# {We do not define callable on groups of samples (like we did for platypus based runs) but have a set threshold on the total number of reads found where we have calls.}
+# -> for now let's use the binomial
+# Intersection with the general callable genome.
+# TODO callable defined for group of samples?
+rule intersect_cnv:
+    input: var="{sample}.tsv.gz", sequenza=DATA+"/{sample}_segments.txt", callable=CALLABLE, chrs=CHRS
+    output: var="{sample}.var_cnv.tsv.gz"
+    shell:
+        """
+            bedtools intersect -b {input.callable} -a <(sed 1d {input.sequenza} | bawk '{{print $1, $2-1, $3, $10}}') | filter_1col 1 {input.chrs} | gzip > {output.var}.tmp;
+            bedtools intersect -wo -a <(zcat {input.var}) -b {output.var}.tmp | bawk '{{print $1, $2, $3, $4":"$8}}' |  gzip > {output.var}
+	    rm {output.var}.tmp
+        """
+
+# Step 3: annotate clonal/subclonal muts with binomial
+# we put all 1/0 to founder/binomialpvalue to avoid having to rewrite all the other rules
+# caution: putting binomial back in this context is difficult, we will need to consider binomial
+# calling only for the _from_ sample and not the other one
+# let's start doing clonal calling for both of them
+rule real_binomial:
+    input: vars="{sample}.var_cnv.tsv.gz", header=SRC_DIR+"/binomheader.tsv"
+    output: "{sample}.calls.tsv.gz"
+    log: "{sample}.calls.tsv.log"
+    params: cn=WANTED_CN, tool=BIN_DIR+"/binomial_Simone"
+    shell:
+        """
+            zcat {input.vars} | tr ":" "\\t" > {output}.tmp
+            cat {input.header} > {output}.3tmp
+            echo {params.cn} | tr "," "\\n" > {output}.2tmp
+            cat {output}.tmp | filter_1col 11 {output}.2tmp | bawk '{{print $4":"$5":"$6":"$7,$0, 1, 0, 1}}' >> {output}.3tmp
+            cat {output}.tmp | filter_1col -v 11 {output}.2tmp | bawk '{{print $4":"$5":"$6":"$7,$0, 0, 0, 1}}' >> {output}.3tmp
+            {params.tool} {output}.3tmp {output}
+            rm {output}.*tmp
+        """

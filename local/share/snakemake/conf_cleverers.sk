@@ -1,0 +1,40 @@
+import os
+from functools import reduce
+
+def find_prj_root(path=os.getcwd()):
+    if os.path.isfile(os.path.join(path,".PRJ_ROOT")):
+        return path
+    else:
+        if path:
+            return find_prj_root(os.path.dirname(path))
+        else:
+            raise Exception("Can not find the PRJ_ROOT directory")
+
+PRJ_ROOT=find_prj_root()
+BIOINFO_ROOT = os.getenv('BIOINFO_ROOT')
+SNAKE_ROOT=os.getenv('SNAKE_ROOT')
+
+DATA=PRJ_ROOT+'/local/share/data/cleverers'
+CHRS=PRJ_ROOT+'/local/share/data/chrs'
+BIN_DIR=PRJ_ROOT+"/local/bin"
+SRC_DIR=PRJ_ROOT+"/local/src"
+
+KIND="both" # | indel | SNV
+MULTI="nomulti"
+WANTED_CN = "1,2,3"
+
+VCFTOBED=BIN_DIR+"/vcf_to_bed"
+
+MODELS=['CRC2566', 'CRC2573', 'CRC2608']
+SAMPLES= {'CRC2566': ['CRC2566LMO-L5', 'CRC2566LM-L5-02', 'CRC2566LM-L5-08', 'CRC2566LM-L7-07', 'CRC2566LM-LG-03'],
+	  'CRC2573': ['CRC2573LMO-L8', 'CRC2573LM-L8-04', 'CRC2573LM-L8-12'],
+	  'CRC2608': ['CRC2608PRO-L6', 'CRC2608PR-L6-02', 'CRC2608PR-L4-04', 'CRC2608PR-L1-02']}
+ALL_SAMPLES = reduce(lambda x,y: x+y, SAMPLES.values(), [])
+
+SAMPLE='wildcards'
+
+CALLABLE=SNAKE_ROOT+'/task/annotations/dataset/gnomad/wgs_calling_regions.hg38.bed.gz'
+
+# Uffa volevo liberarmi di te...versione easy peasy.
+wildcard_constraints:
+    sample="CRC.+"
